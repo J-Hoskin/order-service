@@ -31,6 +31,26 @@ namespace ProductService.Messaging;
 //   which handles scope creation and processor resolution. This means we could
 //   change the consumption strategy (e.g., batch consumption, parallel
 //   processing) without touching routing or processing logic.
+//
+// MANUAL OFFSET COMMIT — AT-LEAST-ONCE DELIVERY:
+//   The main consumer is configured with EnableAutoCommit = false (see Program.cs).
+//   This worker calls consumer.Commit(result) AFTER RouteAsync returns, which
+//   means the offset is only saved to Kafka once all processing — including any
+//   Kafka produces (e.g. the OrderPaused alert) — has fully completed.
+//
+//   Why this matters: if the instance dies mid-processing (after consuming but
+//   before committing), Kafka has no record that the message was handled. When
+//   the partition is rebalanced to a surviving instance, it re-reads from the
+//   last committed offset and reprocesses the message — re-running all side
+//   effects (state mutations, alert production). This is at-least-once delivery.
+//
+//   The tradeoff: if the instance dies AFTER RouteAsync returns but BEFORE
+//   Commit() completes, the message is reprocessed and side effects run twice.
+//   Downstream consumers of orders.alerts must therefore be idempotent.
+//
+//   If RouteAsync throws, Commit() is skipped and the offset is not advanced —
+//   the message will be reprocessed. This is intentional: a processing error
+//   does not silently skip the message.
 // =============================================================================
 public class KafkaConsumerWorker : BackgroundService
 {
@@ -55,7 +75,15 @@ public class KafkaConsumerWorker : BackgroundService
     {
         // Subscribe to the topics that have registered processors.
         // These topic names must match the keyed registrations in Program.cs.
-        _consumer.Subscribe(new[] { "products.sales", "products.purchases", "products.updates" });
+        _consumer.Subscribe(new[]
+        {
+            "orders.created",
+            "orders.payment-confirmed",
+            "orders.warehouse-picked",
+            "orders.pause",
+            "orders.confirm-pause",
+            "orders.resume"
+        });
 
         // Main consume loop — runs until the host signals shutdown via the token.
         while (!stoppingToken.IsCancellationRequested)
@@ -78,10 +106,17 @@ public class KafkaConsumerWorker : BackgroundService
                 // Hand the message to the router. The router will:
                 //   1. Create a new child DI scope
                 //   2. Resolve the correct keyed IMessageProcessor
-                //   3. Call ProcessAsync on it
+                //   3. Call ProcessAsync on it (including any Kafka produces)
                 //   4. Dispose the scope (cleaning up scoped services)
                 // All of that happens inside RouteAsync — the worker doesn't know or care.
                 await _router.RouteAsync(result, cts.Token);
+
+                // Commit the offset only after full processing completes.
+                // This is what makes delivery at-least-once: Kafka only records
+                // our progress here, so a crash before this line causes the next
+                // instance to reprocess the message from scratch.
+                // See the class comment above for the full at-least-once explanation.
+                _consumer.Commit(result);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {

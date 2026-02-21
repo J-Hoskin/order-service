@@ -8,6 +8,7 @@ using ProductService.Interfaces;
 using ProductService.Messaging;
 using ProductService.Processors;
 using ProductService.Services;
+using ProductService.Models;
 
 // =============================================================================
 // PROGRAM.CS — Application composition root
@@ -51,11 +52,19 @@ builder.ConfigureContainer<ContainerBuilder>(container =>
     // Registered as SingleInstance because there should only be one consumer
     // per consumer group member. The consume loop in KafkaConsumerWorker calls
     // _consumer.Consume() sequentially, so there's no concurrent access issue.
+    //
+    // EnableAutoCommit = false: offsets are committed manually in KafkaConsumerWorker
+    // AFTER each message is fully processed (including any Kafka produces such as
+    // the OrderPaused alert). This gives at-least-once delivery — if the instance
+    // dies mid-processing, the next instance reprocesses from the last committed
+    // offset and re-runs all side effects (state mutations, alert production).
+    // See KafkaConsumerWorker for where consumer.Commit(result) is called.
     container.Register(_ => new ConsumerBuilder<string, string>(new ConsumerConfig
     {
         BootstrapServers = "localhost:9092",
         GroupId = "my-service",
-        AutoOffsetReset = AutoOffsetReset.Earliest
+        AutoOffsetReset = AutoOffsetReset.Earliest,
+        EnableAutoCommit = false
     }).Build())
     .As<IConsumer<string, string>>()
     .SingleInstance();
@@ -76,29 +85,25 @@ builder.ConfigureContainer<ContainerBuilder>(container =>
     container.RegisterType<KafkaProducer>().SingleInstance();
 
     // =========================================================================
-    // PRODUCT DETAILS SERVICE — singleton
+    // ORDER SERVICES — singletons
     // =========================================================================
-    // This service accumulates state across messages. It holds a
-    // ConcurrentDictionary<string, ProductDetails> that maps product IDs to
-    // their combined sales/purchases customer lists.
+    // OrderDetailsAggregator accumulates state across all six order topics.
+    // It holds a ConcurrentDictionary<string, OrderDetails> keyed by order ID
+    // and republishes to orders.details on every update.
     //
-    // WHY SINGLETON: The whole point of this service is to maintain state that
-    // spans multiple messages. When a sale comes in, it adds a customer to the
-    // product's sales list. When a purchase comes in later (in a completely
-    // different scope), it adds to the purchases list. If this were scoped,
-    // each message would get a fresh empty dictionary — the state would be lost
-    // when the scope ends, and the combined product message would never actually
-    // combine anything.
+    // OrderStore caches the base order payload from orders.created and
+    // delegates to OrderDetailsAggregator to set the initial order fields.
     //
-    // SCOPED SERVICES CAN SAFELY DEPEND ON SINGLETONS: When the scoped
-    // SalesProcessor or PurchasesProcessor gets created inside a child scope,
-    // Autofac injects this same singleton ProductDetailsService instance into it.
-    // This is allowed — scoped services CAN depend on singletons. The reverse
-    // (singleton depending on scoped) is NOT allowed and would throw an error,
-    // because the singleton would capture a scoped service and hold it forever,
-    // preventing proper disposal.
-    container.RegisterType<ProductStore>().SingleInstance();
-    container.RegisterType<ProductDetailsAggregator>().SingleInstance();
+    // Both must be singletons — state must persist across messages and scopes.
+    container.RegisterType<OrderDetailsAggregator>().SingleInstance();
+    container.RegisterType<OrderStore>().SingleInstance();
+    container.Register(ctx => new OrderPlayPauseAggregator(
+        ctx.Resolve<OrderDetailsAggregator>(),
+        ctx.Resolve<OrderStore>(),
+        ctx.ResolveKeyed<KafkaGlobalTable<string, string>>("orders.pause"),
+        ctx.Resolve<KafkaProducer>(),
+        ctx.Resolve<ILogger<OrderPlayPauseAggregator>>()
+    )).SingleInstance();
 
     // =========================================================================
     // MESSAGE PROCESSORS — scoped, keyed by topic name
@@ -134,16 +139,28 @@ builder.ConfigureContainer<ContainerBuilder>(container =>
     //   This is the correct pattern — short-lived workers calling into
     //   long-lived shared state.
 
-    container.RegisterType<SalesProcessor>()
-        .Keyed<IMessageProcessor>("products.sales")
+    container.RegisterType<OrderCreatedProcessor>()
+        .Keyed<IMessageProcessor>("orders.created")
         .InstancePerLifetimeScope();
 
-    container.RegisterType<PurchasesProcessor>()
-        .Keyed<IMessageProcessor>("products.purchases")
+    container.RegisterType<PaymentProcessor>()
+        .Keyed<IMessageProcessor>("orders.payment-confirmed")
         .InstancePerLifetimeScope();
 
-    container.RegisterType<ProductUpdatesProcessor>()
-        .Keyed<IMessageProcessor>("products.updates")
+    container.RegisterType<WarehouseProcessor>()
+        .Keyed<IMessageProcessor>("orders.warehouse-picked")
+        .InstancePerLifetimeScope();
+
+    container.RegisterType<PauseOrderProcessor>()
+        .Keyed<IMessageProcessor>("orders.pause")
+        .InstancePerLifetimeScope();
+
+    container.RegisterType<ConfirmPauseProcessor>()
+        .Keyed<IMessageProcessor>("orders.confirm-pause")
+        .InstancePerLifetimeScope();
+
+    container.RegisterType<ResumeOrderProcessor>()
+        .Keyed<IMessageProcessor>("orders.resume")
         .InstancePerLifetimeScope();
 
     // =========================================================================
@@ -216,6 +233,26 @@ builder.ConfigureContainer<ContainerBuilder>(container =>
         return new KafkaGlobalTable<string, string>(consumer, "customers", logger);
     })
     .AsSelf()
+    .As<IHostedService>()
+    .SingleInstance();
+
+    // GlobalTable for orders.pause — all instances consume all partitions so
+    // pause timestamps survive instance failure and Kafka rebalance.
+    // Consumer group: my-service-global-pause (independent from main consumer).
+    container.Register(ctx =>
+    {
+        var consumer = new ConsumerBuilder<string, string>(new ConsumerConfig
+        {
+            BootstrapServers = "localhost:9092",
+            GroupId = "my-service-global-pause",
+            AutoOffsetReset = AutoOffsetReset.Earliest,
+            EnableAutoCommit = true
+        }).Build();
+
+        var logger = ctx.Resolve<ILogger<KafkaGlobalTable<string, string>>>();
+        return new KafkaGlobalTable<string, string>(consumer, "orders.pause", logger);
+    })
+    .Keyed<KafkaGlobalTable<string, string>>("orders.pause")
     .As<IHostedService>()
     .SingleInstance();
 

@@ -36,7 +36,7 @@ public class KafkaProducer : IDisposable
     // When provided, it is forwarded to Confluent's ProduceAsync — if the token fires
     // (per-message deadline or shutdown), the produce operation is cancelled promptly
     // rather than waiting for a broker that may be unreachable.
-    public async Task ProduceAsync(string topic, string key, string value,
+    public async Task ProduceAsync(string topic, string key, string? value,
         CancellationToken cancellationToken = default)
     {
         try
@@ -44,7 +44,7 @@ public class KafkaProducer : IDisposable
             await _producer.ProduceAsync(topic, new Message<string, string>
             {
                 Key = key,
-                Value = value
+                Value = value! // null is valid for tombstones; Confluent.Kafka supports null values natively
             }, cancellationToken);
         }
         catch (ProduceException<string, string> ex)
