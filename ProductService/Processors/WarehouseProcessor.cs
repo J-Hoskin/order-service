@@ -1,4 +1,5 @@
 using Confluent.Kafka;
+using Google.Protobuf;
 using Microsoft.Extensions.Logging;
 using ProductService.Extensions;
 using ProductService.Interfaces;
@@ -32,7 +33,16 @@ public class WarehouseProcessor(OrderDetailsAggregator aggregator, ILogger<Wareh
             return;
         }
 
-        var pickedBy = WarehousePicked.Parser.ParseFrom(bytes).ToDomain();
+        string pickedBy;
+        try
+        {
+            pickedBy = WarehousePicked.Parser.ParseFrom(bytes).ToDomain();
+        }
+        catch (InvalidProtocolBufferException ex)
+        {
+            logger.LogError(ex, "Skipping malformed protobuf on orders.warehouse-picked (orderId={OrderId}, offset={Offset})", orderId, message.TopicPartitionOffset);
+            return;
+        }
 
         logger.LogInformation("Order warehouse-picked: orderId={OrderId}, pickedBy={PickedBy}", orderId, pickedBy);
 

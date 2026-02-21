@@ -7,15 +7,15 @@ namespace ProductService.Tests.Messaging;
 
 public class KafkaProducerTests
 {
-    private readonly Mock<IProducer<string, string>> _innerMock;
+    private readonly Mock<IProducer<string, byte[]>> _innerMock;
     private readonly KafkaProducer _sut;
 
     public KafkaProducerTests()
     {
-        _innerMock = new Mock<IProducer<string, string>>();
+        _innerMock = new Mock<IProducer<string, byte[]>>();
         _innerMock
-            .Setup(p => p.ProduceAsync(It.IsAny<string>(), It.IsAny<Message<string, string>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new DeliveryResult<string, string>());
+            .Setup(p => p.ProduceAsync(It.IsAny<string>(), It.IsAny<Message<string, byte[]>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DeliveryResult<string, byte[]>());
 
         _sut = new KafkaProducer(_innerMock.Object);
     }
@@ -23,11 +23,12 @@ public class KafkaProducerTests
     [Fact]
     public async Task ProduceAsync_ForwardsTopicKeyAndValue()
     {
-        await _sut.ProduceAsync("test-topic", "my-key", "my-value");
+        var value = new byte[] { 1, 2, 3 };
+        await _sut.ProduceAsync("test-topic", "my-key", value);
 
         _innerMock.Verify(p => p.ProduceAsync(
             "test-topic",
-            It.Is<Message<string, string>>(m => m.Key == "my-key" && m.Value == "my-value"),
+            It.Is<Message<string, byte[]>>(m => m.Key == "my-key" && m.Value == value),
             It.IsAny<CancellationToken>()),
             Times.Once);
     }
@@ -39,7 +40,7 @@ public class KafkaProducerTests
 
         _innerMock.Verify(p => p.ProduceAsync(
             "test-topic",
-            It.Is<Message<string, string>>(m => m.Key == "tombstone-key" && m.Value == null),
+            It.Is<Message<string, byte[]>>(m => m.Key == "tombstone-key" && m.Value == null),
             It.IsAny<CancellationToken>()),
             Times.Once);
     }
@@ -48,13 +49,13 @@ public class KafkaProducerTests
     public async Task ProduceAsync_WhenInnerThrowsProduceException_WrapsInException()
     {
         var error = new Error(ErrorCode.Local_AllBrokersDown, "all brokers down");
-        var deliveryResult = new DeliveryResult<string, string>();
+        var deliveryResult = new DeliveryResult<string, byte[]>();
         _innerMock
-            .Setup(p => p.ProduceAsync(It.IsAny<string>(), It.IsAny<Message<string, string>>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new ProduceException<string, string>(error, deliveryResult));
+            .Setup(p => p.ProduceAsync(It.IsAny<string>(), It.IsAny<Message<string, byte[]>>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ProduceException<string, byte[]>(error, deliveryResult));
 
         var ex = await Assert.ThrowsAsync<Exception>(() =>
-            _sut.ProduceAsync("my-topic", "k", "v"));
+            _sut.ProduceAsync("my-topic", "k", new byte[] { 0 }));
 
         Assert.Contains("my-topic", ex.Message);
         Assert.Contains(ErrorCode.Local_AllBrokersDown.ToString(), ex.Message);

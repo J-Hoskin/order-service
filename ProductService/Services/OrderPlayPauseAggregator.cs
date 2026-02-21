@@ -1,4 +1,6 @@
+using System.Text;
 using System.Text.Json;
+using Google.Protobuf;
 using Microsoft.Extensions.Logging;
 using ProductService.Extensions;
 using ProductService.Messaging;
@@ -102,7 +104,20 @@ public class OrderPlayPauseAggregator(
         // of each other. The pause timestamp is read from the GlobalTable (not a
         // local dict) so it survives instance failure — see class comment above.
         var pauseBytes = pauseGlobalTable.Get(orderId);
-        var pausePayload = pauseBytes is null ? null : PauseOrder.Parser.ParseFrom(pauseBytes).ToDomain();
+        Models.PauseOrderPayload? pausePayload = null;
+        if (pauseBytes is not null)
+        {
+            try
+            {
+                pausePayload = PauseOrder.Parser.ParseFrom(pauseBytes).ToDomain();
+            }
+            catch (InvalidProtocolBufferException ex)
+            {
+                logger.LogError(ex, "Skipping orders.confirm-pause for {OrderId} — GlobalTable entry is malformed protobuf", orderId);
+                return;
+            }
+        }
+
         if (pausePayload is null || Math.Abs((createdAt - pausePayload.CreatedAt).TotalSeconds) > 10)
         {
             logger.LogWarning("Skipping orders.confirm-pause for {OrderId} — timestamps too far apart or no pause found", orderId);
@@ -117,7 +132,7 @@ public class OrderPlayPauseAggregator(
         // so a crash between SetPauseConfirmedAsync and here will cause the
         // message to be reprocessed and the alert to be re-sent on the next instance.
         var alert = new OrderAlert(orderId, "OrderPaused", DateTime.UtcNow);
-        var alertJson = JsonSerializer.Serialize(alert);
+        var alertJson = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(alert));
         await kafkaProducer.ProduceAsync(AlertsTopic, orderId, alertJson, cancellationToken);
         logger.LogInformation("OrderPaused alert sent for order {OrderId}", orderId);
     }

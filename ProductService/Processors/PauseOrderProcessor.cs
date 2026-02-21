@@ -1,4 +1,5 @@
 using Confluent.Kafka;
+using Google.Protobuf;
 using Microsoft.Extensions.Logging;
 using ProductService.Extensions;
 using ProductService.Interfaces;
@@ -32,9 +33,18 @@ public class PauseOrderProcessor(OrderPlayPauseAggregator playPause, ILogger<Pau
         }
 
         var bytes = message.Message.Value;
-        var createdAt = bytes is { Length: > 0 }
-            ? PauseOrder.Parser.ParseFrom(bytes).ToDomain().CreatedAt
-            : DateTime.UtcNow;
+        DateTime createdAt;
+        try
+        {
+            createdAt = bytes is { Length: > 0 }
+                ? PauseOrder.Parser.ParseFrom(bytes).ToDomain().CreatedAt
+                : DateTime.UtcNow;
+        }
+        catch (InvalidProtocolBufferException ex)
+        {
+            logger.LogError(ex, "Skipping malformed protobuf on orders.pause (orderId={OrderId}, offset={Offset})", orderId, message.TopicPartitionOffset);
+            return;
+        }
 
         await playPause.PauseAsync(orderId, createdAt, cancellationToken);
     }

@@ -1,4 +1,5 @@
 using Confluent.Kafka;
+using Google.Protobuf;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using ProductService.Messaging;
@@ -16,21 +17,21 @@ namespace ProductService.Tests.Processors;
 /// </summary>
 public class OrderCreatedProcessorTests
 {
-    private readonly Mock<IProducer<string, string>> _producerMock;
+    private readonly Mock<IProducer<string, byte[]>> _producerMock;
     private readonly OrderCreatedProcessor _sut;
 
     public OrderCreatedProcessorTests()
     {
-        _producerMock = new Mock<IProducer<string, string>>();
+        _producerMock = new Mock<IProducer<string, byte[]>>();
         _producerMock
-            .Setup(p => p.ProduceAsync(It.IsAny<string>(), It.IsAny<Message<string, string>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new DeliveryResult<string, string>());
+            .Setup(p => p.ProduceAsync(It.IsAny<string>(), It.IsAny<Message<string, byte[]>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DeliveryResult<string, byte[]>());
 
         var kafkaProducer = new KafkaProducer(_producerMock.Object);
         var aggregator = new OrderDetailsAggregator(kafkaProducer, NullLogger<OrderDetailsAggregator>.Instance);
         var store = new OrderStore(aggregator, NullLogger<OrderStore>.Instance);
 
-        _sut = new OrderCreatedProcessor(store, NullLogger<OrderCreatedProcessor>.Instance);
+        _sut = new OrderCreatedProcessor(store, kafkaProducer, NullLogger<OrderCreatedProcessor>.Instance);
     }
 
     [Fact]
@@ -39,7 +40,7 @@ public class OrderCreatedProcessorTests
         var msg = MessageFactory.Build("orders.created", null, Array.Empty<byte>());
         await _sut.ProcessAsync(msg, CancellationToken.None);
         _producerMock.Verify(
-            p => p.ProduceAsync(It.IsAny<string>(), It.IsAny<Message<string, string>>(), It.IsAny<CancellationToken>()),
+            p => p.ProduceAsync(It.IsAny<string>(), It.IsAny<Message<string, byte[]>>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -49,7 +50,7 @@ public class OrderCreatedProcessorTests
         var msg = MessageFactory.Build("orders.created", "", Array.Empty<byte>());
         await _sut.ProcessAsync(msg, CancellationToken.None);
         _producerMock.Verify(
-            p => p.ProduceAsync(It.IsAny<string>(), It.IsAny<Message<string, string>>(), It.IsAny<CancellationToken>()),
+            p => p.ProduceAsync(It.IsAny<string>(), It.IsAny<Message<string, byte[]>>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -59,7 +60,7 @@ public class OrderCreatedProcessorTests
         var msg = MessageFactory.Build("orders.created", "order-1", (byte[]?)null);
         await _sut.ProcessAsync(msg, CancellationToken.None);
         _producerMock.Verify(
-            p => p.ProduceAsync(It.IsAny<string>(), It.IsAny<Message<string, string>>(), It.IsAny<CancellationToken>()),
+            p => p.ProduceAsync(It.IsAny<string>(), It.IsAny<Message<string, byte[]>>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -69,7 +70,7 @@ public class OrderCreatedProcessorTests
         var msg = MessageFactory.Build("orders.created", "order-1", Array.Empty<byte>());
         await _sut.ProcessAsync(msg, CancellationToken.None);
         _producerMock.Verify(
-            p => p.ProduceAsync(It.IsAny<string>(), It.IsAny<Message<string, string>>(), It.IsAny<CancellationToken>()),
+            p => p.ProduceAsync(It.IsAny<string>(), It.IsAny<Message<string, byte[]>>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -88,8 +89,64 @@ public class OrderCreatedProcessorTests
         _producerMock.Verify(
             p => p.ProduceAsync(
                 "orders.details",
-                It.Is<Message<string, string>>(m => m.Key == "order-99"),
+                It.Is<Message<string, byte[]>>(m => m.Key == "order-99"),
                 It.IsAny<CancellationToken>()),
             Times.Once);
+    }
+
+    [Fact]
+    public async Task MoreThanFiveItems_PublishesToOrdersWhales()
+    {
+        var proto = new OrderCreated
+        {
+            CustomerId = "cust-whale",
+            Items =
+            {
+                new ProtoOrderItem { ProductId = "p1", ProductName = "A", Quantity = 1, Price = "1.00" },
+                new ProtoOrderItem { ProductId = "p2", ProductName = "B", Quantity = 1, Price = "1.00" },
+                new ProtoOrderItem { ProductId = "p3", ProductName = "C", Quantity = 1, Price = "1.00" },
+                new ProtoOrderItem { ProductId = "p4", ProductName = "D", Quantity = 1, Price = "1.00" },
+                new ProtoOrderItem { ProductId = "p5", ProductName = "E", Quantity = 1, Price = "1.00" },
+                new ProtoOrderItem { ProductId = "p6", ProductName = "F", Quantity = 1, Price = "1.00" },
+            }
+        };
+        var expectedBytes = proto.ToByteArray();
+        var msg = MessageFactory.Build("orders.created", "order-whale", proto);
+
+        await _sut.ProcessAsync(msg, CancellationToken.None);
+
+        _producerMock.Verify(
+            p => p.ProduceAsync(
+                "orders.whales",
+                It.Is<Message<string, byte[]>>(m => m.Key == "order-whale" && m.Value.SequenceEqual(expectedBytes)),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task FiveOrFewerItems_DoesNotPublishToOrdersWhales()
+    {
+        var proto = new OrderCreated
+        {
+            CustomerId = "cust-small",
+            Items =
+            {
+                new ProtoOrderItem { ProductId = "p1", ProductName = "A", Quantity = 1, Price = "1.00" },
+                new ProtoOrderItem { ProductId = "p2", ProductName = "B", Quantity = 1, Price = "1.00" },
+                new ProtoOrderItem { ProductId = "p3", ProductName = "C", Quantity = 1, Price = "1.00" },
+                new ProtoOrderItem { ProductId = "p4", ProductName = "D", Quantity = 1, Price = "1.00" },
+                new ProtoOrderItem { ProductId = "p5", ProductName = "E", Quantity = 1, Price = "1.00" },
+            }
+        };
+        var msg = MessageFactory.Build("orders.created", "order-small", proto);
+
+        await _sut.ProcessAsync(msg, CancellationToken.None);
+
+        _producerMock.Verify(
+            p => p.ProduceAsync(
+                "orders.whales",
+                It.IsAny<Message<string, byte[]>>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 }

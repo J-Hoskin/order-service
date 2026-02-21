@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
+using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using ProductService.Messaging;
@@ -197,7 +198,7 @@ public class OrderDetailsAggregator
 
     private async Task PublishAsync(OrderDetails details, CancellationToken cancellationToken = default)
     {
-        var value = JsonSerializer.Serialize(details);
+        var value = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(details));
         _logger.LogInformation("Publishing order details for {OrderId} (Status={Status})", details.OrderId, details.Status);
         await _producer.ProduceAsync("orders.details", details.OrderId, value, cancellationToken);
     }

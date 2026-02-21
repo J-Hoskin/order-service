@@ -1,4 +1,5 @@
 using Confluent.Kafka;
+using Google.Protobuf;
 using Microsoft.Extensions.Logging;
 using ProductService.Extensions;
 using ProductService.Interfaces;
@@ -33,9 +34,18 @@ public class ConfirmPauseProcessor(OrderPlayPauseAggregator playPause, ILogger<C
         }
 
         var bytes = message.Message.Value;
-        var createdAt = bytes is { Length: > 0 }
-            ? ConfirmPause.Parser.ParseFrom(bytes).ToDomain().CreatedAt
-            : DateTime.UtcNow;
+        DateTime createdAt;
+        try
+        {
+            createdAt = bytes is { Length: > 0 }
+                ? ConfirmPause.Parser.ParseFrom(bytes).ToDomain().CreatedAt
+                : DateTime.UtcNow;
+        }
+        catch (InvalidProtocolBufferException ex)
+        {
+            logger.LogError(ex, "Skipping malformed protobuf on orders.confirm-pause (orderId={OrderId}, offset={Offset})", orderId, message.TopicPartitionOffset);
+            return;
+        }
 
         await playPause.ConfirmPauseAsync(orderId, createdAt, cancellationToken);
     }

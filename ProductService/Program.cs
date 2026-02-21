@@ -69,14 +69,16 @@ builder.ConfigureContainer<ContainerBuilder>(container =>
     .As<IConsumer<string, byte[]>>()
     .SingleInstance();
 
-    // Producer — used by KafkaProducer wrapper to send messages to Kafka.
+    // Producer — used by KafkaProducer wrapper to send all messages to Kafka.
     // SingleInstance because IProducer<TKey, TValue> from Confluent.Kafka is
     // designed to be shared. It batches and sends messages internally.
-    container.Register(_ => new ProducerBuilder<string, string>(new ProducerConfig
+    // byte[] value covers all output topics: orders.details and orders.alerts
+    // publish UTF-8 encoded JSON bytes; orders.whales publishes raw proto bytes.
+    container.Register(_ => new ProducerBuilder<string, byte[]>(new ProducerConfig
     {
         BootstrapServers = "localhost:9092"
-    }).Build())
-    .As<IProducer<string, string>>()
+    }).SetValueSerializer(Serializers.ByteArray).Build())
+    .As<IProducer<string, byte[]>>()
     .SingleInstance();
 
     // KafkaProducer — our thin wrapper around IProducer. Singleton because it

@@ -14,7 +14,7 @@ namespace ProductService.Tests.Services;
 
 public class OrderPlayPauseAggregatorTests
 {
-    private readonly Mock<IProducer<string, string>> _producerMock;
+    private readonly Mock<IProducer<string, byte[]>> _producerMock;
     private readonly OrderStore _store;
     private readonly OrderDetailsAggregator _aggregator;
     private readonly Mock<IConsumer<string, byte[]>> _tableConsumerMock;
@@ -23,10 +23,10 @@ public class OrderPlayPauseAggregatorTests
 
     public OrderPlayPauseAggregatorTests()
     {
-        _producerMock = new Mock<IProducer<string, string>>();
+        _producerMock = new Mock<IProducer<string, byte[]>>();
         _producerMock
-            .Setup(p => p.ProduceAsync(It.IsAny<string>(), It.IsAny<Message<string, string>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new DeliveryResult<string, string>());
+            .Setup(p => p.ProduceAsync(It.IsAny<string>(), It.IsAny<Message<string, byte[]>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DeliveryResult<string, byte[]>());
 
         var kafkaProducer = new KafkaProducer(_producerMock.Object);
         _aggregator = new OrderDetailsAggregator(kafkaProducer, NullLogger<OrderDetailsAggregator>.Instance);
@@ -60,7 +60,7 @@ public class OrderPlayPauseAggregatorTests
     {
         await _sut.PauseAsync("ghost", DateTime.UtcNow);
         _producerMock.Verify(
-            p => p.ProduceAsync(It.IsAny<string>(), It.IsAny<Message<string, string>>(), It.IsAny<CancellationToken>()),
+            p => p.ProduceAsync(It.IsAny<string>(), It.IsAny<Message<string, byte[]>>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -70,7 +70,7 @@ public class OrderPlayPauseAggregatorTests
         await SeedOrderAsync("order-P1");
         await _sut.PauseAsync("order-P1", DateTime.UtcNow);
         _producerMock.Verify(
-            p => p.ProduceAsync("orders.details", It.Is<Message<string, string>>(m => m.Key == "order-P1"), It.IsAny<CancellationToken>()),
+            p => p.ProduceAsync("orders.details", It.Is<Message<string, byte[]>>(m => m.Key == "order-P1"), It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
@@ -81,7 +81,7 @@ public class OrderPlayPauseAggregatorTests
     {
         await _sut.ConfirmPauseAsync("ghost", DateTime.UtcNow);
         _producerMock.Verify(
-            p => p.ProduceAsync(It.IsAny<string>(), It.IsAny<Message<string, string>>(), It.IsAny<CancellationToken>()),
+            p => p.ProduceAsync(It.IsAny<string>(), It.IsAny<Message<string, byte[]>>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -92,7 +92,7 @@ public class OrderPlayPauseAggregatorTests
         var staleTime = DateTime.UtcNow.AddSeconds(-20); // older than 10-second window
         await _sut.ConfirmPauseAsync("order-P2", staleTime);
         _producerMock.Verify(
-            p => p.ProduceAsync(It.IsAny<string>(), It.IsAny<Message<string, string>>(), It.IsAny<CancellationToken>()),
+            p => p.ProduceAsync(It.IsAny<string>(), It.IsAny<Message<string, byte[]>>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -103,7 +103,7 @@ public class OrderPlayPauseAggregatorTests
         // GlobalTable is empty → Guard 2 fires
         await _sut.ConfirmPauseAsync("order-P3", DateTime.UtcNow);
         _producerMock.Verify(
-            p => p.ProduceAsync("orders.alerts", It.IsAny<Message<string, string>>(), It.IsAny<CancellationToken>()),
+            p => p.ProduceAsync("orders.alerts", It.IsAny<Message<string, byte[]>>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -122,7 +122,7 @@ public class OrderPlayPauseAggregatorTests
         await _sut.ConfirmPauseAsync("order-P4", confirmTime);
 
         _producerMock.Verify(
-            p => p.ProduceAsync("orders.alerts", It.IsAny<Message<string, string>>(), It.IsAny<CancellationToken>()),
+            p => p.ProduceAsync("orders.alerts", It.IsAny<Message<string, byte[]>>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -142,14 +142,14 @@ public class OrderPlayPauseAggregatorTests
         _producerMock.Verify(
             p => p.ProduceAsync(
                 "orders.alerts",
-                It.Is<Message<string, string>>(m => m.Key == "order-P5" && m.Value.Contains("OrderPaused")),
+                It.Is<Message<string, byte[]>>(m => m.Key == "order-P5" && System.Text.Encoding.UTF8.GetString(m.Value).Contains("OrderPaused")),
                 It.IsAny<CancellationToken>()),
             Times.Once);
 
         _producerMock.Verify(
             p => p.ProduceAsync(
                 "orders.details",
-                It.Is<Message<string, string>>(m => m.Key == "order-P5"),
+                It.Is<Message<string, byte[]>>(m => m.Key == "order-P5"),
                 It.IsAny<CancellationToken>()),
             Times.Once);
     }
@@ -161,7 +161,7 @@ public class OrderPlayPauseAggregatorTests
     {
         await _sut.ResumeAsync("ghost");
         _producerMock.Verify(
-            p => p.ProduceAsync(It.IsAny<string>(), It.IsAny<Message<string, string>>(), It.IsAny<CancellationToken>()),
+            p => p.ProduceAsync(It.IsAny<string>(), It.IsAny<Message<string, byte[]>>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -172,11 +172,11 @@ public class OrderPlayPauseAggregatorTests
         await _sut.ResumeAsync("order-R1");
 
         _producerMock.Verify(
-            p => p.ProduceAsync("orders.details", It.Is<Message<string, string>>(m => m.Key == "order-R1"), It.IsAny<CancellationToken>()),
+            p => p.ProduceAsync("orders.details", It.Is<Message<string, byte[]>>(m => m.Key == "order-R1"), It.IsAny<CancellationToken>()),
             Times.Once);
         _producerMock.Verify(
-            p => p.ProduceAsync("orders.pause", It.Is<Message<string, string>>(m => m.Key == "order-R1" && m.Value == null), It.IsAny<CancellationToken>()),
-            Times.Once);
+            p => p.ProduceAsync("orders.pause", It.Is<Message<string, byte[]>>(m => m.Key == "order-R1" && m.Value == null), It.IsAny<CancellationToken>()),
+            Times.Once); // null value = tombstone
     }
 
     /// <summary>

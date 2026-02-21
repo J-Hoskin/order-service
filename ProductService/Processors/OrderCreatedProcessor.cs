@@ -1,7 +1,9 @@
 using Confluent.Kafka;
+using Google.Protobuf;
 using Microsoft.Extensions.Logging;
 using ProductService.Extensions;
 using ProductService.Interfaces;
+using ProductService.Messaging;
 using ProductService.Proto;
 using ProductService.Services;
 
@@ -21,7 +23,7 @@ namespace ProductService.Processors;
 //   message. OrderStore must be a singleton to hold its cache across messages.
 //   We split them: a scoped processor as the entry point, singleton for state.
 // =============================================================================
-public class OrderCreatedProcessor(OrderStore orderStore, ILogger<OrderCreatedProcessor> logger)
+public class OrderCreatedProcessor(OrderStore orderStore, KafkaProducer kafkaProducer, ILogger<OrderCreatedProcessor> logger)
     : IMessageProcessor
 {
     public async Task ProcessAsync(ConsumeResult<string, byte[]> message, CancellationToken cancellationToken)
@@ -37,7 +39,23 @@ public class OrderCreatedProcessor(OrderStore orderStore, ILogger<OrderCreatedPr
 
         logger.LogInformation("Order created: {OrderId}", orderId);
 
-        var payload = OrderCreated.Parser.ParseFrom(bytes).ToDomain();
+        OrderCreated proto;
+        try
+        {
+            proto = OrderCreated.Parser.ParseFrom(bytes);
+        }
+        catch (InvalidProtocolBufferException ex)
+        {
+            logger.LogError(ex, "Skipping malformed protobuf on orders.created (orderId={OrderId}, offset={Offset})", orderId, message.TopicPartitionOffset);
+            return;
+        }
+
+        var payload = proto.ToDomain();
         await orderStore.UpdateAsync(orderId, payload, cancellationToken);
+
+        if (payload.Items.Count > 5)
+        {
+            await kafkaProducer.ProduceAsync("orders.whales", orderId, bytes, cancellationToken);
+        }
     }
 }

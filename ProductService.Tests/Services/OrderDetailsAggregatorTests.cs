@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Text;
 using System.Text.Json;
 using Confluent.Kafka;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -12,15 +13,15 @@ namespace ProductService.Tests.Services;
 
 public class OrderDetailsAggregatorTests
 {
-    private readonly Mock<IProducer<string, string>> _producerMock;
+    private readonly Mock<IProducer<string, byte[]>> _producerMock;
     private readonly OrderDetailsAggregator _sut;
 
     public OrderDetailsAggregatorTests()
     {
-        _producerMock = new Mock<IProducer<string, string>>();
+        _producerMock = new Mock<IProducer<string, byte[]>>();
         _producerMock
-            .Setup(p => p.ProduceAsync(It.IsAny<string>(), It.IsAny<Message<string, string>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new DeliveryResult<string, string>());
+            .Setup(p => p.ProduceAsync(It.IsAny<string>(), It.IsAny<Message<string, byte[]>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DeliveryResult<string, byte[]>());
 
         var kafkaProducer = new KafkaProducer(_producerMock.Object);
         _sut = new OrderDetailsAggregator(kafkaProducer, NullLogger<OrderDetailsAggregator>.Instance);
@@ -29,10 +30,9 @@ public class OrderDetailsAggregatorTests
     private OrderDetails CaptureLastPublished()
     {
         var lastCall = _producerMock.Invocations
-            .Where(i => i.Method.Name == nameof(IProducer<string, string>.ProduceAsync))
-            .Last();
-        var msg = (Message<string, string>)lastCall.Arguments[1];
-        return JsonSerializer.Deserialize<OrderDetails>(msg.Value)!;
+            .Last(i => i.Method.Name == nameof(IProducer<string, byte[]>.ProduceAsync));
+        var msg = (Message<string, byte[]>)lastCall.Arguments[1];
+        return JsonSerializer.Deserialize<OrderDetails>(Encoding.UTF8.GetString(msg.Value))!;
     }
 
     // ── UpdateOrderAsync ────────────────────────────────────────────────────
@@ -51,7 +51,7 @@ public class OrderDetailsAggregatorTests
     {
         await _sut.UpdateOrderAsync("ord-2", "c", ImmutableList<OrderItem>.Empty);
         _producerMock.Verify(p => p.ProduceAsync("orders.details",
-            It.Is<Message<string, string>>(m => m.Key == "ord-2"),
+            It.Is<Message<string, byte[]>>(m => m.Key == "ord-2"),
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -151,7 +151,7 @@ public class OrderDetailsAggregatorTests
     {
         await _sut.AddPaymentReferenceAsync("new-ord", "PAY-NEW");
         _producerMock.Verify(
-            p => p.ProduceAsync("orders.details", It.Is<Message<string, string>>(m => m.Key == "new-ord"), It.IsAny<CancellationToken>()),
+            p => p.ProduceAsync("orders.details", It.Is<Message<string, byte[]>>(m => m.Key == "new-ord"), It.IsAny<CancellationToken>()),
             Times.Once);
     }
 }

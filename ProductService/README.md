@@ -6,39 +6,47 @@ A C# Kafka microservice that consumes order fulfillment events from multiple ind
 
 ### Message Flow
 
+```mermaid
+flowchart LR
+    OC(["orders.created"])
+    OPC(["orders.payment-confirmed"])
+    OWP(["orders.warehouse-picked"])
+    OPA(["orders.pause"])
+    OCP(["orders.confirm-pause"])
+    OR(["orders.resume"])
+
+    OCRP["OrderCreatedProcessor"]
+    PP["PaymentProcessor"]
+    WP["WarehouseProcessor"]
+    POP["PauseOrderProcessor"]
+    CPP["ConfirmPauseProcessor"]
+    ROP["ResumeOrderProcessor"]
+
+    OS["OrderStore\n.UpdateAsync()"]
+    ODA["OrderDetailsAggregator"]
+
+    OD(["orders.details"])
+    OA(["orders.alerts"])
+    OW(["orders.whales"])
+
+    OPC --> PP --> ODA
+    OWP --> WP --> ODA
+    OPPA["OrderPlayPauseAggregator"]
+
+    OPA --> POP --> OPPA
+    OCP --> CPP --> OPPA
+    OR --> ROP --> OPPA
+
+    OPPA --> OS
+    OPPA --> ODA
+
+    ODA -->|"every update"| OD
+    ODA -->|"on pause confirmed"| OA
+
+    OC --> OCRP --> OS -->|"caches base order"| ODA
+    OCRP -->|"Items.Count > 5"| OW
+    ODA ~~~ OW
 ```
-Kafka (Protobuf bytes)
-    → IConsumer<string, byte[]>
-    → Processor: ParseFrom(bytes) → .ToDomain() → domain model
-    → singleton services
-    → IProducer<string, string> → orders.details / orders.alerts (JSON, unchanged)
-
-orders.created           →  OrderCreatedProcessor   →  OrderStore.UpdateAsync()
-                                                              ↓ (caches base order, then calls)
-                                                        OrderDetailsAggregator.UpdateOrderAsync()
-
-orders.payment-confirmed →  PaymentProcessor         →  OrderDetailsAggregator.AddPaymentReferenceAsync()
-
-orders.warehouse-picked  →  WarehouseProcessor       →  OrderDetailsAggregator.AddWarehousePickAsync()
-
-orders.pause             →  PauseOrderProcessor      →  OrderDetailsAggregator.SetPauseRequestedAsync()
-
-orders.confirm-pause     →  ConfirmPauseProcessor    →  OrderDetailsAggregator.SetPauseConfirmedAsync()
-
-orders.resume            →  ResumeOrderProcessor     →  OrderDetailsAggregator.ResumeOrderAsync()
-
-All six paths publish the latest OrderDetails to orders.details (key = order ID)
-```
-
-### Serialization
-
-**Input topics** (all six order topics) use **Protobuf**. The main consumer is `IConsumer<string, byte[]>`. Each processor calls `XxxMessage.Parser.ParseFrom(bytes)` then `.ToDomain()` (an extension method in `Extensions/`) to convert to the domain model before passing to services.
-
-**Output topics** (`orders.details`, `orders.alerts`) use **JSON** via `IProducer<string, string>`, unchanged.
-
-Proto definitions live in `Proto/`. The `Grpc.Tools` package generates C# classes from them at build time. Extension methods that convert proto objects to domain models are in `Extensions/`.
-
-The `orders.pause` GlobalTable also consumes Protobuf bytes (`KafkaGlobalTable<string, byte[]>`). `OrderPlayPauseAggregator` parses the proto when performing the pause timestamp guard check.
 
 ### OrderDetails Progressive Enrichment
 
@@ -121,6 +129,7 @@ flowchart LR
     OPPA --> ODA
 
     ODA --> KP --> KOUT
+    OCP --> KBP["KafkaBytesProducer\n(IProducer<string,byte[]>)"] --> KWHALES["orders.whales"]
 
     KCUST --> KGT
 ```
@@ -139,7 +148,8 @@ flowchart LR
 | `ResumeOrderProcessor` | Scoped (keyed: "orders.resume") | Clears pause flags, restores derived status |
 | `OrderStore` | Singleton | Caches base order payload from orders.created |
 | `OrderDetailsAggregator` | Singleton | Aggregates all order events, derives Status, publishes to orders.details |
-| `KafkaProducer` | Singleton | Wrapper around Confluent.Kafka IProducer |
+| `KafkaProducer` | Singleton | Wrapper around `IProducer<string, string>` — publishes JSON to `orders.details` / `orders.alerts` |
+| `IProducer<string, byte[]>` | Singleton | Raw bytes producer — used by `OrderCreatedProcessor` to forward large orders (>5 items) to `orders.whales` |
 | `KafkaGlobalTable` | Singleton (HostedService) | Consumes a compacted topic into an in-memory lookup table |
 
 ### Scope-Per-Message Pattern
@@ -187,7 +197,7 @@ These are **mandatory** for correctness. Violating them will cause instances to 
 
 **Externalized state (Redis/database):** All instances read/write shared external state. Rejected because it adds a network dependency on every message and a new infrastructure component to manage, when co-partitioning solves the problem with zero code changes and zero additional infrastructure.
 
-**KafkaGlobalTable for product details:** Each instance publishes partial updates and consumes the full topic to rebuild complete state. Rejected because it introduces eventual consistency (stale reads during propagation), race conditions on concurrent merges, amplified Kafka I/O (every update consumed by every instance), and full dataset memory usage per instance. Co-partitioning gives immediate consistency with simpler logic.
+**KafkaGlobalTable for order details:** Each instance publishes partial updates and consumes the full topic to rebuild complete state. Rejected because it introduces eventual consistency (stale reads during propagation), race conditions on concurrent merges, amplified Kafka I/O (every update consumed by every instance), and full dataset memory usage per instance. Co-partitioning gives immediate consistency with simpler logic.
 
 ### Scaling
 

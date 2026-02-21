@@ -1,0 +1,38 @@
+# Build outputs
+bin/
+obj/
+out/
+
+# .NET
+*.user
+*.suo
+*.userprefs
+*.userosscache
+*.sln.docstates
+.vs/
+
+# Test results
+TestResults/
+coveragereport/
+*.trx
+*.coverage
+*.coveragexml
+
+# NuGet
+*.nupkg
+*.snupkg
+packages/
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+# Rider / JetBrains
+.idea/
+*.sln.iml
+
+# VS Code
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db

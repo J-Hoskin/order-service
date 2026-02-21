@@ -15,25 +15,24 @@ namespace ProductService.Tests.Processors;
 
 public class ConfirmPauseProcessorTests
 {
-    private readonly Mock<IProducer<string, string>> _producerMock;
+    private readonly Mock<IProducer<string, byte[]>> _producerMock;
     private readonly OrderStore _store;
-    private readonly KafkaGlobalTable<string, byte[]> _globalTable;
     private readonly ConfirmPauseProcessor _sut;
 
     public ConfirmPauseProcessorTests()
     {
-        _producerMock = new Mock<IProducer<string, string>>();
+        _producerMock = new Mock<IProducer<string, byte[]>>();
         _producerMock
-            .Setup(p => p.ProduceAsync(It.IsAny<string>(), It.IsAny<Message<string, string>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new DeliveryResult<string, string>());
+            .Setup(p => p.ProduceAsync(It.IsAny<string>(), It.IsAny<Message<string, byte[]>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DeliveryResult<string, byte[]>());
 
         var kafkaProducer = new KafkaProducer(_producerMock.Object);
         var aggregator = new OrderDetailsAggregator(kafkaProducer, NullLogger<OrderDetailsAggregator>.Instance);
         _store = new OrderStore(aggregator, NullLogger<OrderStore>.Instance);
 
-        _globalTable = BuildEmptyGlobalTable();
+        var globalTable = BuildEmptyGlobalTable();
         var playPause = new OrderPlayPauseAggregator(
-            aggregator, _store, _globalTable, kafkaProducer,
+            aggregator, _store, globalTable, kafkaProducer,
             NullLogger<OrderPlayPauseAggregator>.Instance);
 
         _sut = new ConfirmPauseProcessor(playPause, NullLogger<ConfirmPauseProcessor>.Instance);
@@ -54,7 +53,7 @@ public class ConfirmPauseProcessorTests
         var msg = MessageFactory.Build("orders.confirm-pause", null, Array.Empty<byte>());
         await _sut.ProcessAsync(msg, CancellationToken.None);
         _producerMock.Verify(
-            p => p.ProduceAsync(It.IsAny<string>(), It.IsAny<Message<string, string>>(), It.IsAny<CancellationToken>()),
+            p => p.ProduceAsync(It.IsAny<string>(), It.IsAny<Message<string, byte[]>>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -64,7 +63,7 @@ public class ConfirmPauseProcessorTests
         var msg = MessageFactory.Build("orders.confirm-pause", "", Array.Empty<byte>());
         await _sut.ProcessAsync(msg, CancellationToken.None);
         _producerMock.Verify(
-            p => p.ProduceAsync(It.IsAny<string>(), It.IsAny<Message<string, string>>(), It.IsAny<CancellationToken>()),
+            p => p.ProduceAsync(It.IsAny<string>(), It.IsAny<Message<string, byte[]>>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -77,7 +76,7 @@ public class ConfirmPauseProcessorTests
         await _sut.ProcessAsync(msg, CancellationToken.None);
 
         _producerMock.Verify(
-            p => p.ProduceAsync(It.IsAny<string>(), It.IsAny<Message<string, string>>(), It.IsAny<CancellationToken>()),
+            p => p.ProduceAsync(It.IsAny<string>(), It.IsAny<Message<string, byte[]>>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -93,7 +92,7 @@ public class ConfirmPauseProcessorTests
 
         // Guard 2 fires (no pause in GlobalTable) → nothing published to orders.alerts
         _producerMock.Verify(
-            p => p.ProduceAsync("orders.alerts", It.IsAny<Message<string, string>>(), It.IsAny<CancellationToken>()),
+            p => p.ProduceAsync("orders.alerts", It.IsAny<Message<string, byte[]>>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 

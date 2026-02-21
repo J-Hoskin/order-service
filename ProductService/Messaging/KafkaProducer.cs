@@ -7,7 +7,7 @@ namespace ProductService.Messaging;
 // =============================================================================
 // LIFETIME: Singleton
 //
-// This is a thin wrapper around IProducer<string, string>. It's singleton because:
+// This is a thin wrapper around IProducer<string, byte[]>. It's singleton because:
 //   1. The underlying IProducer is thread-safe and designed to be shared.
 //      It maintains internal buffers and a background thread for batching
 //      and sending messages to Kafka brokers.
@@ -24,9 +24,9 @@ namespace ProductService.Messaging;
 // =============================================================================
 public class KafkaProducer : IDisposable
 {
-    private readonly IProducer<string, string> _producer;
+    private readonly IProducer<string, byte[]> _producer;
 
-    public KafkaProducer(IProducer<string, string> producer)
+    public KafkaProducer(IProducer<string, byte[]> producer)
     {
         _producer = producer;
     }
@@ -36,18 +36,18 @@ public class KafkaProducer : IDisposable
     // When provided, it is forwarded to Confluent's ProduceAsync — if the token fires
     // (per-message deadline or shutdown), the produce operation is cancelled promptly
     // rather than waiting for a broker that may be unreachable.
-    public async Task ProduceAsync(string topic, string key, string? value,
+    public async Task ProduceAsync(string topic, string key, byte[]? value,
         CancellationToken cancellationToken = default)
     {
         try
         {
-            await _producer.ProduceAsync(topic, new Message<string, string>
+            await _producer.ProduceAsync(topic, new Message<string, byte[]>
             {
                 Key = key,
                 Value = value! // null is valid for tombstones; Confluent.Kafka supports null values natively
             }, cancellationToken);
         }
-        catch (ProduceException<string, string> ex)
+        catch (ProduceException<string, byte[]> ex)
         {
             throw new Exception($"Failed to produce message to {topic}: [{ex.Error.Code}] {ex.Error.Reason}", ex);
         }
