@@ -71,3 +71,4 @@ C:\Users\James\RiderProjects\ProductService\ProductService\obj\Debug\net8.0\refi
 C:\Users\James\RiderProjects\ProductService\ProductService\obj\Debug\net8.0\ProductService.pdb
 C:\Users\James\RiderProjects\ProductService\ProductService\obj\Debug\net8.0\ProductService.genruntimeconfig.cache
 C:\Users\James\RiderProjects\ProductService\ProductService\obj\Debug\net8.0\ref\ProductService.dll
+C:\Users\James\RiderProjects\ProductService\ProductService\bin\Debug\net8.0\Google.Protobuf.dll

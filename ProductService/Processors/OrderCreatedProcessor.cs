@@ -1,6 +1,8 @@
 using Confluent.Kafka;
 using Microsoft.Extensions.Logging;
+using ProductService.Extensions;
 using ProductService.Interfaces;
+using ProductService.Proto;
 using ProductService.Services;
 
 namespace ProductService.Processors;
@@ -22,12 +24,12 @@ namespace ProductService.Processors;
 public class OrderCreatedProcessor(OrderStore orderStore, ILogger<OrderCreatedProcessor> logger)
     : IMessageProcessor
 {
-    public async Task ProcessAsync(ConsumeResult<string, string> message, CancellationToken cancellationToken)
+    public async Task ProcessAsync(ConsumeResult<string, byte[]> message, CancellationToken cancellationToken)
     {
         var orderId = message.Message.Key;
-        var payload = message.Message.Value;
+        var bytes = message.Message.Value;
 
-        if (string.IsNullOrEmpty(orderId) || string.IsNullOrEmpty(payload))
+        if (string.IsNullOrEmpty(orderId) || bytes is null || bytes.Length == 0)
         {
             logger.LogWarning("Skipping orders.created message with missing key or value (orderId={OrderId})", orderId);
             return;
@@ -35,6 +37,7 @@ public class OrderCreatedProcessor(OrderStore orderStore, ILogger<OrderCreatedPr
 
         logger.LogInformation("Order created: {OrderId}", orderId);
 
+        var payload = OrderCreated.Parser.ParseFrom(bytes).ToDomain();
         await orderStore.UpdateAsync(orderId, payload, cancellationToken);
     }
 }

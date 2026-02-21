@@ -1,6 +1,8 @@
 using Confluent.Kafka;
 using Microsoft.Extensions.Logging;
+using ProductService.Extensions;
 using ProductService.Interfaces;
+using ProductService.Proto;
 using ProductService.Services;
 
 namespace ProductService.Processors;
@@ -11,7 +13,7 @@ namespace ProductService.Processors;
 // LIFETIME: Scoped (InstancePerLifetimeScope), keyed to "orders.payment-confirmed"
 //
 // Message key   = order ID
-// Message value = payment reference assigned by the payment provider
+// Message value = Protobuf PaymentConfirmed (payment_reference)
 //
 // Calls OrderDetailsAggregator to set PaymentReference on the OrderDetails
 // for this order and republish. The OrderDetails Status advances to
@@ -20,16 +22,18 @@ namespace ProductService.Processors;
 public class PaymentProcessor(OrderDetailsAggregator aggregator, ILogger<PaymentProcessor> logger)
     : IMessageProcessor
 {
-    public async Task ProcessAsync(ConsumeResult<string, string> message, CancellationToken cancellationToken)
+    public async Task ProcessAsync(ConsumeResult<string, byte[]> message, CancellationToken cancellationToken)
     {
         var orderId = message.Message.Key;
-        var paymentReference = message.Message.Value;
+        var bytes = message.Message.Value;
 
-        if (string.IsNullOrEmpty(orderId) || string.IsNullOrEmpty(paymentReference))
+        if (string.IsNullOrEmpty(orderId) || bytes is null || bytes.Length == 0)
         {
-            logger.LogWarning("Skipping payment message with missing key or value (orderId={OrderId}, paymentReference={PaymentReference})", orderId, paymentReference);
+            logger.LogWarning("Skipping payment message with missing key or value (orderId={OrderId})", orderId);
             return;
         }
+
+        var paymentReference = PaymentConfirmed.Parser.ParseFrom(bytes).ToDomain();
 
         logger.LogInformation("Payment confirmed: orderId={OrderId}, paymentReference={PaymentReference}", orderId, paymentReference);
 

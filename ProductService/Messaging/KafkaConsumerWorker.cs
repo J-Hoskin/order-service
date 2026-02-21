@@ -55,7 +55,7 @@ namespace ProductService.Messaging;
 public class KafkaConsumerWorker : BackgroundService
 {
     private readonly MessageRouter _router;
-    private readonly IConsumer<string, string> _consumer;
+    private readonly IConsumer<string, byte[]> _consumer;
     private readonly ILogger<KafkaConsumerWorker> _logger;
 
     // All dependencies are singletons — safe to inject into a singleton worker.
@@ -63,7 +63,7 @@ public class KafkaConsumerWorker : BackgroundService
     // IConsumer is singleton (one Kafka consumer per consumer group member).
     public KafkaConsumerWorker(
         MessageRouter router,
-        IConsumer<string, string> consumer,
+        IConsumer<string, byte[]> consumer,
         ILogger<KafkaConsumerWorker> logger)
     {
         _router = router;

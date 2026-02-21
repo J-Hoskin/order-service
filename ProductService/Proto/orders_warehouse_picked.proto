@@ -1,0 +1,6 @@
+syntax = "proto3";
+option csharp_namespace = "ProductService.Proto";
+
+message WarehousePicked {
+  string picked_by = 1;
+}

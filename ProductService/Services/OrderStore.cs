@@ -1,6 +1,4 @@
 using System.Collections.Concurrent;
-using System.Collections.Immutable;
-using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using ProductService.Models;
 
@@ -34,19 +32,11 @@ public class OrderStore
 
     /// <summary>
     /// Called by OrderCreatedProcessor when orders.created arrives.
-    /// Deserializes the payload, caches it, and triggers a publish of OrderDetails.
+    /// Caches the payload and triggers a publish of OrderDetails.
     /// </summary>
-    public async Task UpdateAsync(string orderId, string value,
+    public async Task UpdateAsync(string orderId, OrderCreatedPayload payload,
         CancellationToken cancellationToken = default)
     {
-        var payload = JsonSerializer.Deserialize<OrderCreatedPayload>(value);
-
-        if (payload is null)
-        {
-            _logger.LogWarning("Failed to deserialize orders.created payload for {OrderId}", orderId);
-            return;
-        }
-
         _cache[orderId] = payload;
         _logger.LogInformation("Cached order {OrderId} for customer {CustomerId}", orderId, payload.CustomerId);
 
@@ -60,9 +50,3 @@ public class OrderStore
     public bool Exists(string orderId) => _cache.ContainsKey(orderId);
 }
 
-/// <summary>
-/// Payload shape for messages on the orders.created topic.
-/// </summary>
-public record OrderCreatedPayload(
-    string CustomerId,
-    ImmutableList<OrderItem> Items);

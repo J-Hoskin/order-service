@@ -1,0 +1,8 @@
+syntax = "proto3";
+option csharp_namespace = "ProductService.Proto";
+import "google/protobuf/timestamp.proto";
+
+message ConfirmPause {
+  google.protobuf.Timestamp created_at = 1;
+  string confirmed_by = 2;
+}

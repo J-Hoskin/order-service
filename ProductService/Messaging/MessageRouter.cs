@@ -95,7 +95,7 @@ public class MessageRouter
     // (it is a linked token created in KafkaConsumerWorker). Forwarding it to the
     // processor ensures any awaitable inside the processor chain can be cancelled
     // promptly if either fires.
-    public async Task RouteAsync(ConsumeResult<string, string> message, CancellationToken cancellationToken)
+    public async Task RouteAsync(ConsumeResult<string, byte[]> message, CancellationToken cancellationToken)
     {
         // The message's topic determines which processor to resolve.
         // "products.sales" → SalesProcessor, "products.purchases" → PurchasesProcessor

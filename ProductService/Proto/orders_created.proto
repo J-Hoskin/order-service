@@ -1,0 +1,14 @@
+syntax = "proto3";
+option csharp_namespace = "ProductService.Proto";
+
+message OrderCreated {
+  string customer_id = 1;
+  repeated ProtoOrderItem items = 2;
+}
+
+message ProtoOrderItem {
+  string product_id = 1;
+  string product_name = 2;
+  int32  quantity     = 3;
+  string price        = 4;
+}

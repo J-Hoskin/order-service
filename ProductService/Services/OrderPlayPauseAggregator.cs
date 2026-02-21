@@ -1,7 +1,9 @@
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using ProductService.Extensions;
 using ProductService.Messaging;
 using ProductService.Models;
+using ProductService.Proto;
 
 namespace ProductService.Services;
 
@@ -48,7 +50,7 @@ namespace ProductService.Services;
 public class OrderPlayPauseAggregator(
     OrderDetailsAggregator orderDetailsAggregator,
     OrderStore orderStore,
-    KafkaGlobalTable<string, string> pauseGlobalTable,
+    KafkaGlobalTable<string, byte[]> pauseGlobalTable,
     KafkaProducer kafkaProducer,
     ILogger<OrderPlayPauseAggregator> logger)
 {
@@ -99,8 +101,8 @@ public class OrderPlayPauseAggregator(
         // Guard 2: pause and confirm-pause timestamps must be within 10 seconds
         // of each other. The pause timestamp is read from the GlobalTable (not a
         // local dict) so it survives instance failure — see class comment above.
-        var pauseJson = pauseGlobalTable.Get(orderId);
-        var pausePayload = pauseJson is null ? null : JsonSerializer.Deserialize<PauseOrderPayload>(pauseJson);
+        var pauseBytes = pauseGlobalTable.Get(orderId);
+        var pausePayload = pauseBytes is null ? null : PauseOrder.Parser.ParseFrom(pauseBytes).ToDomain();
         if (pausePayload is null || Math.Abs((createdAt - pausePayload.CreatedAt).TotalSeconds) > 10)
         {
             logger.LogWarning("Skipping orders.confirm-pause for {OrderId} — timestamps too far apart or no pause found", orderId);

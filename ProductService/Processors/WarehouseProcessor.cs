@@ -1,6 +1,8 @@
 using Confluent.Kafka;
 using Microsoft.Extensions.Logging;
+using ProductService.Extensions;
 using ProductService.Interfaces;
+using ProductService.Proto;
 using ProductService.Services;
 
 namespace ProductService.Processors;
@@ -11,7 +13,7 @@ namespace ProductService.Processors;
 // LIFETIME: Scoped (InstancePerLifetimeScope), keyed to "orders.warehouse-picked"
 //
 // Message key   = order ID
-// Message value = name or ID of the warehouse staff member who picked the order
+// Message value = Protobuf WarehousePicked (picked_by)
 //
 // Calls OrderDetailsAggregator to set PickedByWarehouseStaff on the OrderDetails
 // and republish. Status advances to WarehousePicked (unless paused).
@@ -19,16 +21,18 @@ namespace ProductService.Processors;
 public class WarehouseProcessor(OrderDetailsAggregator aggregator, ILogger<WarehouseProcessor> logger)
     : IMessageProcessor
 {
-    public async Task ProcessAsync(ConsumeResult<string, string> message, CancellationToken cancellationToken)
+    public async Task ProcessAsync(ConsumeResult<string, byte[]> message, CancellationToken cancellationToken)
     {
         var orderId = message.Message.Key;
-        var pickedBy = message.Message.Value;
+        var bytes = message.Message.Value;
 
-        if (string.IsNullOrEmpty(orderId) || string.IsNullOrEmpty(pickedBy))
+        if (string.IsNullOrEmpty(orderId) || bytes is null || bytes.Length == 0)
         {
             logger.LogWarning("Skipping warehouse-picked message with missing key or value (orderId={OrderId})", orderId);
             return;
         }
+
+        var pickedBy = WarehousePicked.Parser.ParseFrom(bytes).ToDomain();
 
         logger.LogInformation("Order warehouse-picked: orderId={OrderId}, pickedBy={PickedBy}", orderId, pickedBy);
 

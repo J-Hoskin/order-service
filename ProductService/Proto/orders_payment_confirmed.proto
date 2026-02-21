@@ -1,0 +1,6 @@
+syntax = "proto3";
+option csharp_namespace = "ProductService.Proto";
+
+message PaymentConfirmed {
+  string payment_reference = 1;
+}

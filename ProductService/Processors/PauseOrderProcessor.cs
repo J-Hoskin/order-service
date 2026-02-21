@@ -1,8 +1,8 @@
-using System.Text.Json;
 using Confluent.Kafka;
 using Microsoft.Extensions.Logging;
+using ProductService.Extensions;
 using ProductService.Interfaces;
-using ProductService.Models;
+using ProductService.Proto;
 using ProductService.Services;
 
 namespace ProductService.Processors;
@@ -13,7 +13,7 @@ namespace ProductService.Processors;
 // LIFETIME: Scoped (InstancePerLifetimeScope), keyed to "orders.pause"
 //
 // Message key   = order ID
-// Message value = JSON PauseOrderPayload (CreatedAt, Reason)
+// Message value = Protobuf PauseOrder (created_at, reason)
 //
 // Delegates entirely to OrderPlayPauseAggregator, which validates the order
 // exists and sets PauseRequested = true on the OrderDetails.
@@ -21,7 +21,7 @@ namespace ProductService.Processors;
 public class PauseOrderProcessor(OrderPlayPauseAggregator playPause, ILogger<PauseOrderProcessor> logger)
     : IMessageProcessor
 {
-    public async Task ProcessAsync(ConsumeResult<string, string> message, CancellationToken cancellationToken)
+    public async Task ProcessAsync(ConsumeResult<string, byte[]> message, CancellationToken cancellationToken)
     {
         var orderId = message.Message.Key;
 
@@ -31,11 +31,11 @@ public class PauseOrderProcessor(OrderPlayPauseAggregator playPause, ILogger<Pau
             return;
         }
 
-        PauseOrderPayload? payload = null;
-        if (!string.IsNullOrEmpty(message.Message.Value))
-            payload = JsonSerializer.Deserialize<PauseOrderPayload>(message.Message.Value);
+        var bytes = message.Message.Value;
+        var createdAt = bytes is { Length: > 0 }
+            ? PauseOrder.Parser.ParseFrom(bytes).ToDomain().CreatedAt
+            : DateTime.UtcNow;
 
-        var createdAt = payload?.CreatedAt ?? DateTime.UtcNow;
         await playPause.PauseAsync(orderId, createdAt, cancellationToken);
     }
 }

@@ -7,6 +7,12 @@ A C# Kafka microservice that consumes order fulfillment events from multiple ind
 ### Message Flow
 
 ```
+Kafka (Protobuf bytes)
+    → IConsumer<string, byte[]>
+    → Processor: ParseFrom(bytes) → .ToDomain() → domain model
+    → singleton services
+    → IProducer<string, string> → orders.details / orders.alerts (JSON, unchanged)
+
 orders.created           →  OrderCreatedProcessor   →  OrderStore.UpdateAsync()
                                                               ↓ (caches base order, then calls)
                                                         OrderDetailsAggregator.UpdateOrderAsync()
@@ -23,6 +29,16 @@ orders.resume            →  ResumeOrderProcessor     →  OrderDetailsAggregat
 
 All six paths publish the latest OrderDetails to orders.details (key = order ID)
 ```
+
+### Serialization
+
+**Input topics** (all six order topics) use **Protobuf**. The main consumer is `IConsumer<string, byte[]>`. Each processor calls `XxxMessage.Parser.ParseFrom(bytes)` then `.ToDomain()` (an extension method in `Extensions/`) to convert to the domain model before passing to services.
+
+**Output topics** (`orders.details`, `orders.alerts`) use **JSON** via `IProducer<string, string>`, unchanged.
+
+Proto definitions live in `Proto/`. The `Grpc.Tools` package generates C# classes from them at build time. Extension methods that convert proto objects to domain models are in `Extensions/`.
+
+The `orders.pause` GlobalTable also consumes Protobuf bytes (`KafkaGlobalTable<string, byte[]>`). `OrderPlayPauseAggregator` parses the proto when performing the pause timestamp guard check.
 
 ### OrderDetails Progressive Enrichment
 
@@ -209,7 +225,7 @@ The pause flow requires two messages — `orders.pause` followed by `orders.conf
 
 **Solution: `orders.pause` GlobalTable**
 
-`OrderPlayPauseAggregator` does **not** hold pause timestamps in a local dictionary. Instead, it reads them from a `KafkaGlobalTable<string, string>` that continuously consumes the `orders.pause` topic. This GlobalTable uses a separate consumer group (`my-service-global-pause`) so that **all instances consume all partitions** on startup and maintain a complete copy of every pause timestamp at all times.
+`OrderPlayPauseAggregator` does **not** hold pause timestamps in a local dictionary. Instead, it reads them from a `KafkaGlobalTable<string, byte[]>` that continuously consumes the `orders.pause` topic (Protobuf-encoded). This GlobalTable uses a separate consumer group (`my-service-global-pause`) so that **all instances consume all partitions** on startup and maintain a complete copy of every pause timestamp at all times.
 
 **Failover behaviour:**
 

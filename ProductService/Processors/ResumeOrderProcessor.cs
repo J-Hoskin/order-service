@@ -19,7 +19,7 @@ namespace ProductService.Processors;
 public class ResumeOrderProcessor(OrderPlayPauseAggregator playPause, ILogger<ResumeOrderProcessor> logger)
     : IMessageProcessor
 {
-    public async Task ProcessAsync(ConsumeResult<string, string> message, CancellationToken cancellationToken)
+    public async Task ProcessAsync(ConsumeResult<string, byte[]> message, CancellationToken cancellationToken)
     {
         var orderId = message.Message.Key;
 

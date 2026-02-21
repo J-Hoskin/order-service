@@ -60,12 +60,12 @@ public class SalesProcessor : IMessageProcessor
         _logger = logger;
     }
 
-    public async Task ProcessAsync(ConsumeResult<string, string> message, CancellationToken cancellationToken)
+    public async Task ProcessAsync(ConsumeResult<string, byte[]> message, CancellationToken cancellationToken)
     {
         // message.Message.Key = product ID
         // message.Message.Value = customer ID who made the sale
         var productId = message.Message.Key;
-        var customerId = message.Message.Value;
+        var customerId = message.Message.Value is { Length: > 0 } b ? System.Text.Encoding.UTF8.GetString(b) : null;
 
         if (string.IsNullOrEmpty(productId) || string.IsNullOrEmpty(customerId))
         {

@@ -21,5 +21,5 @@ public interface IMessageProcessor
     // cancellationToken is cancelled if the per-message deadline fires or the host is
     // shutting down. Implementations must forward it to all async operations so the
     // processor can be aborted promptly in either case.
-    Task ProcessAsync(ConsumeResult<string, string> message, CancellationToken cancellationToken);
+    Task ProcessAsync(ConsumeResult<string, byte[]> message, CancellationToken cancellationToken);
 }

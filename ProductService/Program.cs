@@ -59,14 +59,14 @@ builder.ConfigureContainer<ContainerBuilder>(container =>
     // dies mid-processing, the next instance reprocesses from the last committed
     // offset and re-runs all side effects (state mutations, alert production).
     // See KafkaConsumerWorker for where consumer.Commit(result) is called.
-    container.Register(_ => new ConsumerBuilder<string, string>(new ConsumerConfig
+    container.Register(_ => new ConsumerBuilder<string, byte[]>(new ConsumerConfig
     {
         BootstrapServers = "localhost:9092",
         GroupId = "my-service",
         AutoOffsetReset = AutoOffsetReset.Earliest,
         EnableAutoCommit = false
-    }).Build())
-    .As<IConsumer<string, string>>()
+    }).SetValueDeserializer(Deserializers.ByteArray).Build())
+    .As<IConsumer<string, byte[]>>()
     .SingleInstance();
 
     // Producer — used by KafkaProducer wrapper to send messages to Kafka.
@@ -100,7 +100,7 @@ builder.ConfigureContainer<ContainerBuilder>(container =>
     container.Register(ctx => new OrderPlayPauseAggregator(
         ctx.Resolve<OrderDetailsAggregator>(),
         ctx.Resolve<OrderStore>(),
-        ctx.ResolveKeyed<KafkaGlobalTable<string, string>>("orders.pause"),
+        ctx.ResolveKeyed<KafkaGlobalTable<string, byte[]>>("orders.pause"),
         ctx.Resolve<KafkaProducer>(),
         ctx.Resolve<ILogger<OrderPlayPauseAggregator>>()
     )).SingleInstance();
@@ -241,18 +241,18 @@ builder.ConfigureContainer<ContainerBuilder>(container =>
     // Consumer group: my-service-global-pause (independent from main consumer).
     container.Register(ctx =>
     {
-        var consumer = new ConsumerBuilder<string, string>(new ConsumerConfig
+        var consumer = new ConsumerBuilder<string, byte[]>(new ConsumerConfig
         {
             BootstrapServers = "localhost:9092",
             GroupId = "my-service-global-pause",
             AutoOffsetReset = AutoOffsetReset.Earliest,
             EnableAutoCommit = true
-        }).Build();
+        }).SetValueDeserializer(Deserializers.ByteArray).Build();
 
-        var logger = ctx.Resolve<ILogger<KafkaGlobalTable<string, string>>>();
-        return new KafkaGlobalTable<string, string>(consumer, "orders.pause", logger);
+        var logger = ctx.Resolve<ILogger<KafkaGlobalTable<string, byte[]>>>();
+        return new KafkaGlobalTable<string, byte[]>(consumer, "orders.pause", logger);
     })
-    .Keyed<KafkaGlobalTable<string, string>>("orders.pause")
+    .Keyed<KafkaGlobalTable<string, byte[]>>("orders.pause")
     .As<IHostedService>()
     .SingleInstance();
 

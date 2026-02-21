@@ -28,10 +28,10 @@ public class ProductUpdatesProcessor(ProductStore productStores, ILogger<Product
     private readonly ProductStore _productStores = productStores;
     private readonly ILogger<ProductUpdatesProcessor> _logger = logger;
 
-    public async Task ProcessAsync(ConsumeResult<string, string> message, CancellationToken cancellationToken)
+    public async Task ProcessAsync(ConsumeResult<string, byte[]> message, CancellationToken cancellationToken)
     {
         var productId = message.Message.Key;
-        var payload = message.Message.Value;
+        var payload = message.Message.Value is { Length: > 0 } b ? System.Text.Encoding.UTF8.GetString(b) : null;
 
         if (string.IsNullOrEmpty(productId) || string.IsNullOrEmpty(payload))
         {
